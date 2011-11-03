@@ -1,14 +1,16 @@
 #!/usr/bin/env python
 
+from google.appengine.ext import deferred
 from google.appengine.ext import db
 from google.appengine.ext import webapp
 from google.appengine.ext.webapp import util
 from google.appengine.api import memcache
 
+import os
 import logging
 import datetime
-import StringIO
 import re
+import status
 
 macaddr_validation = re.compile("([a-fA-F0-9]{2}[:|\-]?){6}")
 
@@ -17,29 +19,14 @@ def is_valid_mac(macaddr):
 
 def invalidate_cache():
     memcache.set("last_update", datetime.datetime.now())
-    memcache.set("status", None)
-        
-def render_status():
-    results = db.GqlQuery("SELECT * FROM MacData WHERE left = NULL")
-    output = StringIO.StringIO()
-    count = results.count()
-    if count:
-        output.write("<h1>XinCheJian is OPENED</h1>")
-    else:
-        output.write("<h1>XinCheJian is CLOSED</h1>")
-    output.write("<p>Currently connected: %d</p>" % count)
-    output.write("<p>Last update GMT: %s</p>" % memcache.get("last_update"))
-    return output.getvalue()
-
+    deferred.defer(status.update_status_cache)
+  
 def get_status():
     status = memcache.get("status")
     if status is not None:
         return status
     else:
-        status = render_status()
-        if not memcache.add("status", status):
-            logging.error("Memcache set failed.")
-        return status
+        return "Unknown status!"
 
 class MacData(db.Model):
     macaddr = db.StringProperty(multiline=False)
@@ -86,10 +73,29 @@ class StatusHandler(webapp.RequestHandler):
     def get(self):
         self.response.out.write(get_status())
 
+class BadgeHandler(webapp.RequestHandler):
+    def __init__(self):
+        open_path = os.path.join(os.path.split(__file__)[0], 'xcj_open_badge.gif')
+        close_path = os.path.join(os.path.split(__file__)[0], 'xcj_closed_badge.gif')
+        self.open_image = file(open_path).read();
+        self.close_image = file(close_path).read();
+        
+    def get(self):
+        self.response.headers['Content-Type'] = 'image/gif'
+        if memcache.get("is_open"):
+            self.response.out.write(self.open_image)
+        else:
+            self.response.out.write(self.close_image)
         
 def main():
-    application = webapp.WSGIApplication([('/join', JoinedHandler), ('/left', LeftHandler), ('/status', StatusHandler), ('/ping', PingHandler)],
-                                         debug=True)
+    application = webapp.WSGIApplication([
+        ('/join', JoinedHandler),
+        ('/left', LeftHandler),
+        ('/status', StatusHandler),
+        ('/ping', PingHandler),
+        ('/badge.gif', BadgeHandler)
+        ],
+        debug=True)
     util.run_wsgi_app(application)
 
 
