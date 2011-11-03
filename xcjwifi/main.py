@@ -18,17 +18,6 @@ macaddr_validation = re.compile("([a-fA-F0-9]{2}[:|\-]?){6}")
 def is_valid_mac(macaddr):
     return macaddr_validation.match(macaddr)
 
-def invalidate_cache():
-    memcache.set("last_update", datetime.datetime.now())
-    deferred.defer(status.update_status_cache)
-  
-def get_status():
-    status = memcache.get("status")
-    if status is not None:
-        return status
-    else:
-        return "Unknown status!"
-
 def get_file_content(filename):
     path = os.path.join(os.path.split(__file__)[0], filename)
     f = file(path)
@@ -47,7 +36,7 @@ class JoinedHandler(webapp.RequestHandler):
             else:
                 m = MacData(macaddr=macaddr)
                 m.put()
-                invalidate_cache()
+                status.invalidate_cache()
                 self.response.out.write('New connection recorded!')
 
 class LeftHandler(webapp.RequestHandler):
@@ -61,19 +50,19 @@ class LeftHandler(webapp.RequestHandler):
                 macdata = results.get()
                 macdata.left = datetime.datetime.now()
                 macdata.put()
-                invalidate_cache()
+                status.invalidate_cache()
                 self.response.out.write('Updated with current datetime!')
             else:
                 self.response.out.write('Not currently connected')
 
 class PingHandler(webapp.RequestHandler):
     def get(self):
-        invalidate_cache()
+        status.invalidate_cache(False)
         self.response.out.write('PONG %s' % memcache.get("last_update"))
         
 class StatusHandler(webapp.RequestHandler):
     def get(self):
-        self.response.out.write(get_status())
+        self.response.out.write(status.get_status())
 
 class BadgeHandler(webapp.RequestHandler):
     def __init__(self):
@@ -99,48 +88,19 @@ class ButtonHandler(webapp.RequestHandler):
         else:
             self.response.out.write(self.close_image)            
 
-class Zone(datetime.tzinfo):
-    def __init__(self,offset,isdst,name):
-        self.offset = offset
-        self.isdst = isdst
-        self.name = name
-    def utcoffset(self, dt):
-        return datetime.timedelta(hours=self.offset) + self.dst(dt)
-    def dst(self, dt):
-            return datetime.timedelta(hours=1) if self.isdst else datetime.timedelta(0)
-    def tzname(self,dt):
-         return self.name
-
-GMT = Zone(0,False,'GMT')
-CST = Zone(8,False,'CST')
-
 class HourlyHandler(webapp.RequestHandler):
     def get(self):
-        self.response.headers['Content-Type'] = 'text/html'
-        results = db.GqlQuery("SELECT * FROM MacData WHERE left != NULL")
-        week_by_hour = [[set() for col in range(0,24)] for row in range(0,7)]
-                
-        for m in results:
-            #self.response.out.write("<br>%s to %s (%s)" % (m.joined, m.left, m.macaddr))
-            #self.response.out.write("<br>%s %s" % (m.joined.weekday(), m.joined.hour))
-            joined = m.joined.replace(tzinfo = GMT).astimezone(CST)
-            left = m.left.replace(tzinfo = GMT).astimezone(CST)
-            for day in range(joined.weekday(), left.weekday()+1):
-                for hour in range(joined.hour, left.hour+1):
-                    week_by_hour[day][hour].add(m.macaddr)
-        self.response.out.write("<table border=1 width=50%")
-        self.response.out.write("<th>")
-        self.response.out.write("<td>Hour<td>Monday<td>Tuesday<td>Wednesday<td>Thursday<td>Friday<td>Saturday<td>Sunday")
-        for hour in range(0,24):
-            self.response.out.write("<tr>")
-            self.response.out.write("<td>%d" % hour)
-            for day in range(0,7):
-                self.response.out.write("<td>")
-                self.response.out.write("%d" % len(week_by_hour[day][hour]))
-                self.response.out.write("</td>")                
-            self.response.out.write("</tr>")
-        self.response.out.write("</table>")
-            
+        hourly = memcache.get("hourly")
+        if not hourly:
+            self.response.out.write("No report currently available")
+        else:
+            self.response.out.write(hourly)    
+
+class HourlyUpdaterHandler(webapp.RequestHandler):
+    def get(self):
+        deferred.defer(status.update_hourly_cache)
+        self.response.out.write("Hourly summary update scheduled")
+        
 def main():
     application = webapp.WSGIApplication([
         ('/join', JoinedHandler),
@@ -150,6 +110,7 @@ def main():
         ('/badge.gif', BadgeHandler),
         ('/button.png', ButtonHandler),
         ('/hourly', HourlyHandler),
+        ('/tasks/hourly', HourlyUpdaterHandler),        
         ],
         debug=True)
     util.run_wsgi_app(application)

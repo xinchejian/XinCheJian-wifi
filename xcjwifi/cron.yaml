@@ -1,0 +1,4 @@
+cron:
+- description: hourly job
+  url: /tasks/hourly
+  schedule: every 1 hours
