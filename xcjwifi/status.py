@@ -2,6 +2,8 @@ from google.appengine.api import memcache
 from google.appengine.ext import db
 import StringIO
 
+from WifiData import MacData # otherwise we get "No implementation for kind" errors
+
 def update_status_cache():
     memcache.set("status", render_status())
 
