@@ -64,6 +64,13 @@ class StatusHandler(webapp.RequestHandler):
     def get(self):
         self.response.out.write(status.get_status())
 
+class MachineStatusHandler(webapp.RequestHandler):
+    def get(self):
+        is_open = memcache.get("is_open");
+        if is_open is None:
+            is_open = False
+        self.response.out.write("%d" % is_open)
+
 class BadgeHandler(webapp.RequestHandler):
     def __init__(self):
         self.open_image = get_file_content('xcj_open_badge.gif')
@@ -106,6 +113,7 @@ def main():
         ('/join', JoinedHandler),
         ('/left', LeftHandler),
         ('/status', StatusHandler),
+        ('/is_open', MachineStatusHandler),
         ('/ping', PingHandler),
         ('/badge.gif', BadgeHandler),
         ('/button.png', ButtonHandler),
