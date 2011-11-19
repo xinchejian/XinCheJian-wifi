@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 from google.appengine.ext import deferred
 from google.appengine.ext import db
 from google.appengine.ext import webapp
@@ -12,6 +11,8 @@ import datetime
 import re
 import status
 from WifiData import MacData
+from MotionData import MotionData
+import time_utils
 
 macaddr_validation = re.compile("([a-fA-F0-9]{2}[:|\-]?){6}")
 
@@ -107,7 +108,36 @@ class HourlyUpdaterHandler(webapp.RequestHandler):
     def get(self):
         deferred.defer(status.update_hourly_cache)
         self.response.out.write("Hourly summary update scheduled")
-        
+
+class MotionHandler(webapp.RequestHandler):
+    def post(self):
+        image = self.request.get('image')
+        ts = self.request.get('timestamp')
+        self.response.out.write(ts)
+
+        ts_datetime = datetime.datetime(int(ts[0:4]),int(ts[4:6]),int(ts[6:8]),int(ts[8:10]),int(ts[10:12]), int(ts[12:14]))
+        self.response.out.write(ts_datetime)
+        self.response.out.write("<br>%d" % len(self.request.str_POST['image']))
+        utc_ts = time_utils.from_cst_to_utc(ts_datetime)
+
+        results = db.GqlQuery("SELECT * FROM MotionData WHERE captured = DATETIME('%s')" % utc_ts.strftime('%Y-%m-%d %H:%M:%S'))
+        if results.count() > 0:
+            self.response.out.write("<br>Error! entry for %s already exist!" % utc_ts)
+        else:
+            m = MotionData(image=self.request.str_POST['image'], captured = utc_ts)
+            m.put()
+
+
+class MotionShowHandler(webapp.RequestHandler):
+    def get(self):
+        results = db.GqlQuery("SELECT * FROM MotionData ORDER BY captured DESC LIMIT 1")
+        self.response.headers['Content-Type'] = 'image/jpeg'
+        #self.response.out.write('%d<br>' % results.count(1))
+        if results.count() > 0:
+            self.response.out.write(results.get().image)
+        #else:
+        #    self.response.out.write("Error, no image recorded yet")
+            
 def main():
     application = webapp.WSGIApplication([
         ('/join', JoinedHandler),
@@ -118,7 +148,9 @@ def main():
         ('/badge.gif', BadgeHandler),
         ('/button.png', ButtonHandler),
         ('/hourly', HourlyHandler),
-        ('/tasks/hourly', HourlyUpdaterHandler),        
+        ('/tasks/hourly', HourlyUpdaterHandler),
+        ('/motion', MotionHandler),
+        ('/show', MotionShowHandler),
         ],
         debug=True)
     util.run_wsgi_app(application)

@@ -31,7 +31,9 @@ def get_status():
     if status:
         return status + get_last_update()
     else:
-        return "Unknown status: no data received by client yet"
+        deferred.defer(update_status_cache)
+        return "Unknown status: no data received by client yet (scheduled update)"
+
     
 def update_status_cache():
     memcache.set("status", render_status())
